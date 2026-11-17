@@ -113,13 +113,24 @@ F) cod_ports_proxy → main-out
 
 G) proxy_ru_rule как в п.1 (refilter + russia-inside → main-out)
 
-Порядок: private/LAN direct; PS5 full tunnel; RU-сервисы direct; ИИ/FanDuel/Telegram/CoD в VPN; остальное по proxy_banned_ru.
+H) YouTube / QUIC (обязательно, иначе на «Обход Польша» ролик зависает при живом google.com)
+   YouTube лезет в UDP 443 (QUIC). Через двуххоп Москва→Польша соединение часто встаёт, TCP при этом живой.
+   1) Правило `quic_drop`: network udp, dest_port 443 → reject/block. Весь TUN или хотя бы:
+      youtube.com, googlevideo.com, ytimg.com, youtu.be, youtubei.googleapis.com, ggphosted.com
+      YouTube остаётся на текущем main (Польша или Обход Польша), но по TCP. Main не менять.
+   2) Если после quic_drop крутилка живая: правило `youtube_proxy` этих доменов на обычную «🇵🇱 Польша» (pl2.srv:443), не на Обход. Main не трогать.
+   3) Если pl2 с этого WAN не встаёт (поэтому main и есть Обход): youtube_proxy → «🇺🇸 Обход США» (usbr.srv:8445).
+   Не пускать YouTube на голый Kamatera / «fatal» / прямой US IP.
+   Не решать «мост режет YouTube» сменой main на US.
+
+Порядок: private/LAN direct; PS5 full tunnel; RU-сервисы direct; quic_drop; youtube_proxy если нужен; ИИ/FanDuel/Telegram/CoD в VPN; остальное по proxy_banned_ru.
 
 ════════════════════════════════
 6) ЧЕГО НЕ ДЕЛАТЬ
 ════════════════════════════════
 - Не отключать PS5/CoD «чтобы почистить».
 - Не ставить main на Wi‑Fi, Hy2, XHTTP, CDN, АВТОРЕЖИМ, stolen SNI.
+- Не тащить YouTube на прямой US/Kamatera, пока не стоит quic_drop (udp/443 block).
 - Не ждать, что обновление подписки само включит fragment и route.rules.
 - Не писать IP приставки в общую подписку панели.
 - Не сносить чужие локальные правила (гостевые сетки, wan_direct, уже рабочие routing_rule) если они не конфликтуют.
@@ -140,8 +151,10 @@ G) proxy_ru_rule как в п.1 (refilter + russia-inside → main-out)
    - main_node = Польша или Обход Польша
    - PS5 /32 → main-out если нашли
    - ru_services_direct, ai_domains_proxy, cod_* на месте
+   - quic_drop udp/443 → reject
+   - youtube.com открывается (ролик, не только google.com)
    - АВТОРЕЖИМ не выбран
-Отчёт агента: что уже было / что дописал / IP PS5 или «не найден» / какой main_node / пинг Польши протоколом.
+Отчёт агента: что уже было / что дописал / IP PS5 или «не найден» / какой main_node / пинг Польши протоколом / YouTube: quic_drop и через какой outbound.
 ````
 
 ## Кенту в Telegram
