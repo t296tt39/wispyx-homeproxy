@@ -60,10 +60,21 @@ uci:
 - preferred_core = hiddify (если пакета нет — sing-box)
 - packet_encoding = xudp
 - routing_mode = proxy_banned_ru
-- default_outbound = direct-out
+- show_advanced_rules = 1
 - proxy_mode = redirect_tproxy
 - proxy_ru_rule refilter = on, node = main-out
 - proxy_ru_rule russia-inside = on, node = main-out
+
+TSPU на домовых провайдерах режет прямой зарубеж (Google, Microsoft, Akamai, Fastly).
+`proxy_banned_ru` сам по себе шлёт в VPN только «запрещёнку», остальное идёт direct и умирает.
+Не ставь routing_mode=global — тогда пропадут кастомные RU-direct правила.
+Не надейся на routing.default_outbound: в режиме proxy_banned_ru final всегда direct-out.
+
+Нужен catch-all ПОСЛЕДНИМ среди routing_rule:
+- секция `foreign_via_vpn` (не дублируй)
+- enabled=1, action=route, outbound=main-out
+- без доменов/портов — матчит всё, что не съели правила выше
+RU (.ru/.su/.рф, госуслуги, банки, Яндекс, VK) остаются в ru_services_direct → direct-out и стоят ВЫШЕ catch-all.
 
 Если uci commit Access denied — uci apply с rollback 90с.
 
@@ -84,7 +95,8 @@ DHCP/ARP: hostname PlayStation / PS5 / PS4, vendor Sony.
 Маршруты, без дублей (секцию шире не сужай):
 
 A) ru_services_direct → direct-out
-   rutube.ru, vk.com, vk.ru, ok.ru, wildberries.ru, gosuslugi.ru, yandex.ru, yandex.net, ya.ru, dzen.ru, mail.ru, sber.ru, tinkoff.ru, tbank.ru, avito.ru, ozon.ru, nalog.ru, mos.ru
+   rutube.ru, vk.com, vk.ru, ok.ru, wildberries.ru, gosuslugi.ru, yandex.ru, yandex.net, ya.ru, dzen.ru, mail.ru, sber.ru, tinkoff.ru, tbank.ru, avito.ru, ozon.ru, nalog.ru, mos.ru,
+   плюс суффиксы ru, su, xn--p1ai (.рф) — не сужай список, Valve/Steam direct если уже есть (Слава) не трогай.
 
 B) ai_domains_proxy → main-out
    .ai, openai.com, chatgpt.com, anthropic.com, claude.ai,
@@ -113,7 +125,7 @@ G) YouTube / QUIC
    Если прямых стран нет — youtube_proxy на 🇺🇸 Обход США (usbr), не на голый Kamatera/fatal.
    Main из-за YouTube на US не менять.
 
-Порядок правил: private/LAN direct; PS5; RU-сервисы direct; quic_drop; youtube_proxy если нужен; ИИ/FanDuel/Telegram/CoD в VPN; остальное proxy_banned_ru.
+Порядок правил: private/LAN direct; PS5; RU-сервисы direct (.ru/.su/.рф); quic_drop; youtube_proxy если нужен; ИИ/FanDuel/Telegram/CoD в VPN; существующие Valve/Steam direct не сносить; последним foreign_via_vpn → main-out (весь остальной зарубеж в VPN).
 
 apply HomeProxy, дождаться ядра.
 
@@ -186,7 +198,8 @@ C) После обновления подписки
 - main = urltest `wispyx_auto` ИЛИ победитель шага 4; в отчёте как именно устроен фейловер
 - watchdog cron есть, пробный generate_204 через mixed-порт проходит
 - PS5 /32 → main-out или «не найден»
-- ru_services_direct, ai_domains_proxy, cod_*, quic_drop на месте
+- ru_services_direct с ru/su/xn--p1ai, ai_domains_proxy, cod_*, quic_drop на месте
+- show_advanced_rules=1 и catch-all `foreign_via_vpn` → main-out последним среди routing_rule
 - youtube.com ролик открывается
 - АВТОРЕЖИМ не выбран
 
