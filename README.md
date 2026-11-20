@@ -194,7 +194,7 @@ B) Watchdog, даже если urltest есть
 2) Два фейла подряд (флаг /tmp/wispyx-hp-fail, не переключать с первого глюка).
 3) Протокол-пинг списка: сначала первая линия, потом вторая. Кандидаты только VLESS TCP REALITY+Vision.
 4) Взять самый быстрый стабильный (2 ок из 2, или 2 из 3 если флапал).
-5) Если текущий main уже этот — не трогать. Иначе uci set homeproxy.config.main_node, apply, reload HomeProxy.
+5) Если текущий main уже этот — не трогать и **не рестартить** ядро. Clash /delay таймаут ≠ смерть ноды. Иначе uci set homeproxy.config.main_node, apply, **reload** (не `/etc/init.d/homeproxy restart` на */5). Готовый скрипт: `wispyx-hp-watch` в этом репо.
 6) Лог в logger -t wispyx-hp-watch. Секреты не писать.
 Если main это urltest-группа и generate_204 через неё мёртв — reload HomeProxy; если после reload всё ещё мёртв — временно поставь лучшую одиночную ноду с замера, в отчёте напиши.
 

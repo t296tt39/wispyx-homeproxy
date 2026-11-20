@@ -1,0 +1,123 @@
+#!/bin/sh
+# wispyx-hp-watch: failover only. Matches wispyx-homeproxy README step 5B.
+# Never logs secrets. Never restart a live main. Kernel restart is daily cron only.
+TAG=wispyx-hp-watch
+H=homeproxy
+FAIL=/tmp/wispyx-hp-fail
+STAMP=/tmp/wispyx-hp-ensure.stamp
+BACK=/tmp/wispyx-hp-back.stamp
+G='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
+W=/usr/share/wispyx
+L(){ logger -t $TAG "$*"; }
+
+mkdir /tmp/wispyx-hp-watch.lock 2>/dev/null || exit 0
+trap 'rmdir /tmp/wispyx-hp-watch.lock' EXIT
+MAIN=$(uci -q get $H.config.main_node)
+[ -z "$MAIN" ] || [ "$MAIN" = nil ] && exit 0
+
+age(){ [ -e "$1" ] && echo $(( $(date +%s) - $(cat $1) )) || echo 999999; }
+lab(){ uci -q get $H.$1.label | tr -cd '[:alnum:] ._-'; }
+
+mixed_port(){
+	p=$(uci -q get $H.config.mixed_port)
+	[ -n "$p" ] && [ "$p" != 0 ] && { echo "$p"; return; }
+	echo 5330
+}
+
+probe_mixed(){
+	mp=$(mixed_port)
+	curl --version >/dev/null 2>&1 || return 1
+	c=$(curl -sS -o /dev/null -w '%{http_code}' -m 8 -x "http://127.0.0.1:${mp}" https://www.gstatic.com/generate_204 2>/dev/null || echo 000)
+	[ "$c" = 204 ] || [ "$c" = 200 ]
+}
+
+probe_clash(){
+	if curl --version >/dev/null 2>&1; then
+		out=$(curl -s -m 10 "http://127.0.0.1:9090/proxies/main-out/delay?url=${G}&timeout=8000" 2>/dev/null)
+	else
+		out=$(wget -qO- -T 10 "http://127.0.0.1:9090/proxies/main-out/delay?url=${G}&timeout=8000" 2>/dev/null)
+	fi
+	d=$(echo "$out" | sed -n 's/.*"delay":\([0-9]*\).*/\1/p')
+	[ -n "$d" ] && [ "$d" -gt 0 ] 2>/dev/null && [ "$d" -lt 8000 ]
+}
+
+check(){
+	probe_mixed && return 0
+	probe_clash && return 0
+	sleep 5
+	probe_mixed && return 0
+	probe_clash
+}
+
+reload_hp(){
+	L "$1"
+	/etc/init.d/homeproxy reload >/dev/null 2>&1 || /etc/init.d/homeproxy restart >/dev/null 2>&1
+	rm -f $FAIL
+}
+
+if [ $(age $STAMP) -gt 3600 ] && [ -x "$W/hp.uc" ]; then
+	r=$(ucode $W/hp.uc ensure 2>/dev/null)
+	if [ "$r" = changed ]; then
+		date +%s > $STAMP
+		if check; then
+			L "config re-ensured, generate_204 alive, no restart"
+		else
+			reload_hp "config re-ensured, generate_204 dead, reload"
+			exit 0
+		fi
+	fi
+fi
+
+CL=""
+[ -x "$W/hp.uc" ] && CL=$(ucode $W/hp.uc classify 2>/dev/null)
+cls_of(){ echo "$CL" | awk -F'\t' -v n="$1" '$2==n{print $1}'; }
+ids(){ echo "$CL" | awk -F'\t' -v c="$1" '$1==c{print $2}'; }
+pick(){
+	t=$1; u=$2; shift 2; best=""; bd=99999
+	[ -x "$W/measure.sh" ] || return
+	for line in $(VTURL=$u sh $W/measure.sh $t "$@" | tr ' ' ','); do
+		case "$line" in *,*) ;; *) continue;; esac
+		id=${line%%,*}; r=${line#*,}; sum=0; k=0; ok=1
+		for d in $(echo $r | tr ',' ' '); do case "$d" in ''|*[!0-9]*) ok=0;; *) sum=$((sum+d)); k=$((k+1));; esac; done
+		[ $ok = 1 ] && [ $k -gt 0 ] || continue
+		m=$((sum/k)); [ $m -lt $bd ] && { bd=$m; best=$id; }
+	done
+}
+
+if check; then
+	rm -f $FAIL
+	if [ "$(cls_of $MAIN)" = S ] && [ $(age $BACK) -gt 3600 ]; then
+		date +%s > $BACK
+		pick 3 "$G" $(ids F)
+		if [ -n "$best" ] && [ "$best" != "$MAIN" ] && [ "$bd" -lt 800 ]; then
+			uci set $H.config.main_node="$best"
+			uci commit $H
+			reload_hp "back from bypass to direct $(lab $best) ${bd}ms"
+		fi
+	fi
+	exit 0
+fi
+
+n=$(( $(cat $FAIL 2>/dev/null || echo 0) + 1 )); echo $n > $FAIL
+L "generate_204 failed (count $n)"
+[ $n -lt 2 ] && exit 0
+
+if [ "$MAIN" = urltest ]; then
+	L "urltest generate_204 dead twice, reload once"
+	/etc/init.d/homeproxy reload >/dev/null 2>&1 || /etc/init.d/homeproxy restart >/dev/null 2>&1
+	sleep 8
+	if check; then rm -f $FAIL; L "urltest alive after reload"; exit 0; fi
+fi
+
+pick 2 "$G" $(ids F)
+{ [ -z "$best" ] || [ "$bd" -gt 800 ]; } && pick 2 "$G" $(ids S)
+if [ -z "$best" ]; then L "no live candidate, nothing changed"; exit 0; fi
+if [ "$best" = "$MAIN" ]; then
+	L "best is current main ($(lab $best) ${bd}ms), no restart"
+	rm -f $FAIL
+	exit 0
+fi
+uci set $H.config.main_node="$best"
+uci commit $H
+echo "$MAIN" > /etc/wispyx-hp-prev-main
+reload_hp "main_node switched -> $(lab $best) ${bd}ms"
