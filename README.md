@@ -47,7 +47,7 @@
   `sed -i '/#wispyx-hp-sub/d' /etc/crontabs/root` затем допиши строку, `/etc/init.d/cron reload`.
 - `uci set homeproxy.subscription.auto_update=1` и `update_via_proxy=1`. Штатный `auto_update_time` — раз в сутки, его не хватает; часовой `#wispyx-hp-sub` init.d не затирает (он трогает только `#homeproxy_autosetup`).
 - После каждого обновления подписки пересобери члены urltest (UUID нод могли смениться). **Ядро не рестартить**, если generate_204 через main-out живой — иначе рвёт PS5/CoD.
-- Рестарт HomeProxy (ensure fragment/youtube + `homeproxy restart`) — **один раз в сутки**, ночь, маркер `#wispyx-hp-daily`, не дублируй:
+- Рестарт HomeProxy (ensure fragment/urltest + `homeproxy restart`) — **один раз в сутки**, ночь, маркер `#wispyx-hp-daily`, не дублируй:
   `17 1 * * * /usr/bin/wispyx-hp-daily #wispyx-hp-daily`
   (01:17 UTC ≈ 04:17 МСК). Часовой `#wispyx-hp-sub` только качает ноды.
 - Подписка даёт ТОЛЬКО ноды. Маршруты, tls_fragment, PS5, ИИ сами НЕ приедут.
@@ -127,13 +127,13 @@ F) cod_ports_proxy → main-out
    TCP+UDP 3074, 3075, 3478-3480, 27014-27050, 30000-32000
 
 G) YouTube / QUIC
-   quic_drop: udp dest_port 443 → reject/block (весь TUN или youtube.com, googlevideo.com, ytimg.com, youtu.be, youtubei.googleapis.com, ggphosted.com).
-   YouTube через двуххоп-обход часто зависает при живом google.com — это QUIC, не «мост режет YouTube».
-   Если после quic_drop ролик мёртв: youtube_proxy этих доменов на лучшую ПРЯМУЮ страну с шага 2/4 (не на Обход).
-   Если прямых стран нет — youtube_proxy на 🇺🇸 Обход США (usbr), не на голый Kamatera/fatal.
-   Main из-за YouTube на US не менять.
+   Реклама YouTube режется **на Xray ноды** (country VLESS → серверный YouTube hop). На роутере отдельных YT-нод нет и не будет.
+   quic_drop: udp dest_port 443 → reject (youtube.com, googlevideo.com, ytimg.com, youtu.be, youtubei.googleapis.com, ggpht.com).
+   youtube/googlevideo/ytimg → **main-out** той же first-line страны, что и весь зарубеж. catch-all `foreign_via_vpn` это уже делает; если секция `youtube_proxy` есть — outbound=`main-out`.
+   ЗАПРЕЩЕНО: клонировать ноды `yt_*`, urltest `youtube_node`, youtube_proxy на Обход/usbr/Wi‑Fi/АВТО, класть YT-копии в main urltest, тащить YouTube на прямой US, менять main из-за YouTube.
+   YouTube через двуххоп-обход зависает (QUIC) и **минует** серверный ads-hop. hp.uc ensure не должен создавать yt_ копии; watchdog не переключает YouTube-ноды.
 
-Порядок правил: private/LAN direct; PS5; RU-сервисы direct (.ru/.su/.рф); quic_drop; youtube_proxy если нужен; ИИ/FanDuel/Telegram/CoD в VPN; существующие Valve/Steam direct не сносить; последним foreign_via_vpn → main-out (весь остальной зарубеж в VPN).
+Порядок правил: private/LAN direct; PS5; RU-сервисы direct (.ru/.su/.рф); quic_drop; youtube_proxy если есть → main-out; ИИ/FanDuel/Telegram/CoD в VPN; существующие Valve/Steam direct не сносить; последним foreign_via_vpn → main-out (весь остальной зарубеж в VPN).
 
 apply HomeProxy, дождаться ядра.
 
@@ -183,7 +183,7 @@ B) Watchdog, даже если urltest есть
 C) После обновления подписки
 Пересобери список членов urltest (новые ноды, старые UUID могли смениться). Watchdog не удалять.
 Часовой update **не** делает `/etc/init.d/homeproxy restart`, пока generate_204 живой.
-Рестарт ядра — cron `#wispyx-hp-daily` раз в сутки (ночь). Скрипт `/usr/bin/wispyx-hp-daily`: ensure fragment/urltest/youtube, затем restart. Не вешать ensure+restart на `*/5` и не на каждый час.
+Рестарт ядра — cron `#wispyx-hp-daily` раз в сутки (ночь). Скрипт `/usr/bin/wispyx-hp-daily`: ensure fragment/urltest (без yt_ копий), затем restart. Не вешать ensure+restart на `*/5` и не на каждый час.
 
 ════════════════════════════════
 НЕ ДЕЛАТЬ
@@ -194,7 +194,7 @@ C) После обновления подписки
 - Не включать interrupt_exist_connections — рвёт игры.
 - Не ставить main на АВТОРЕЖИМ / Wi‑Fi / Hy2 / XHTTP / CDN / steal.
 - Не отключать PS5/CoD «чтобы почистить».
-- Не тащить YouTube на прямой US, пока нет quic_drop.
+- Не клонировать `yt_*` / `youtube_node` urltest. YouTube = main-out. Не тащить YouTube на Обход/usbr/прямой US.
 - Не ждать, что подписка сама включит fragment и route.rules.
 - Не пропускать шаг 1. Не оставлять подписку «как было» без свежего update и без часового cron.
 - Не рестартить HomeProxy каждый час из-за ensure/подписки — рвёт CoD/PS5. Рестарт ядра раз в сутки (`#wispyx-hp-daily`).
@@ -215,10 +215,10 @@ C) После обновления подписки
 - PS5 /32 → main-out или «не найден»
 - ru_services_direct с ru/su/xn--p1ai, ai_domains_proxy, cod_*, quic_drop на месте
 - show_advanced_rules=1 и catch-all `foreign_via_vpn` → main-out последним среди routing_rule
-- youtube.com ролик открывается
+- youtube.com ролик открывается через main-out (нет секций `yt_*` / `youtube_node`)
 - АВТОРЕЖИМ не выбран
 
-Отчёт: что было / что дописал / таблица пингов шаг 2 / таблица шаг 4 / main_node / urltest члены / cron watchdog да-нет / запасной мост / IP PS5 / YouTube outbound.
+Отчёт: что было / что дописал / таблица пингов шаг 2 / таблица шаг 4 / main_node / urltest члены / cron watchdog да-нет / запасной мост / IP PS5 / YouTube outbound=main-out / yt_ копии сняты.
 ````
 
 ## Кенту в Telegram
