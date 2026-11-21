@@ -1,6 +1,7 @@
 #!/bin/sh
 # wispyx-hp-watch: failover only. Matches wispyx-homeproxy README step 5B.
 # Never logs secrets. Never restart a live main. Kernel restart is daily cron only.
+# pick() uses hp.uc classify: F = wispyx :8443 empty-or-vision REALITY on *.wispyx.net.
 TAG=wispyx-hp-watch
 H=homeproxy
 FAIL=/tmp/wispyx-hp-fail
