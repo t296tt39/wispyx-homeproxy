@@ -53,7 +53,12 @@
   `sed -i '/#wispyx-hp-sub/d' /etc/crontabs/root` затем допиши строку, `/etc/init.d/cron reload`.
 - `uci set homeproxy.subscription.auto_update=1` и `update_via_proxy=1`. Штатный `auto_update_time` — раз в сутки, его не хватает; часовой `#wispyx-hp-sub` init.d не затирает (он трогает только `#homeproxy_autosetup`).
 - После каждого обновления подписки:
-  1) сотри leftover Vision на first-line: для каждой страны `*.srv.wispyx.net` с `port=8443` сделай `uci delete homeproxy.<id>.vless_flow` (импортёр часто оставляет `xtls-rprx-vision` при пустом инбаунде — хендшейк тупит, **hp.uc classify со старым Vision-фильтром вообще не видит DE/AT/US** и watchdog прыгает на Польшу/обход);
+  1) сотри leftover Vision на first-line: для каждой страны `*.srv.wispyx.net` с `port=8443` сделай `uci delete homeproxy.<id>.vless_flow`. Импортёр после Update часто снова пишет `xtls-rprx-vision` — хендшейк на NV-8443 мёртвый, чекер показывает **прошлый** IP.
+     Патч на роутере (обязательно, иначе через час Vision вернётся):
+     - `generate_client.uc`: `flow: ("" + node.port === "8443") ? null : node.vless_flow,`
+     - `update_subscriptions.uc`: при `port==8443` `vless_flow=null` (и в parse URI, и в parse SINGBOX outbound)
+     - `hp.uc ensure` удаляет `vless_flow` с нод `:8443`
+     После патча даже грязный UCI не попадёт в JSON.
   2) пересобери члены urltest (UUID нод могли смениться).
   **Ядро не рестартить**, если generate_204 через main-out живой — иначе рвёт PS5/CoD. Исключение: сменил `main_node` или починил flow/catch-all — **один** `homeproxy restart`, иначе UCI «Германия», а `hiddify-c.json` ещё старый выход (`interrupt_exist_connections=0` держит старые TCP).
 - Рестарт HomeProxy (ensure fragment/urltest + `homeproxy restart`) — **один раз в сутки**, ночь, маркер `#wispyx-hp-daily`, не дублируй:
