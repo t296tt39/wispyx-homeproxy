@@ -94,6 +94,12 @@ if (cmd === 'ensure') {
 	});
 	if (uci.get(C, 'youtube_node')) { uci.delete(C, 'youtube_node'); changed = true; }
 	unlink('/etc/wispyx-hp-yt');
+	uci.foreach(C, 'node', (n) => {
+		if (('' + n.port) === '8443' && n.vless_flow) {
+			uci.delete(C, n['.name'], 'vless_flow');
+			changed = true;
+		}
+	});
 
 }
 

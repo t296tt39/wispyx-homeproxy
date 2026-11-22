@@ -20,9 +20,51 @@
 
 Не factory-reset HomeProxy (подписка и ноды стран/обходов остаются). Кастомные **routing_rule** перед накатом золота снести и поставить заново — старый зоопарк (yt_ копии, youtube_node, левые outbound) иначе остаётся. Снимок старых правил обязателен.
 
+## Патч leftover Vision (корешу / отдельному агенту)
+
+Страны wispyx: VLESS TCP REALITY **:8443 без Vision**. HomeProxy после Update подписки часто снова пишет `vless_flow=xtls-rprx-vision`. Клиент с Vision на пустой инбаунд не коннектится, Clash 65535, чекер IP показывает **прошлую** живую страну. Один `uci delete` не лечит — импортёр вернёт через час.
+
+Скопируй агенту этот блок:
+
+```
+Роутер OpenWrt + HomeProxy. Секреты, UUID, ключи, URL подписки не печатай и в git не клади.
+
+Баг: после Update подписки на карточках *.srv.wispyx.net:8443 снова xtls-rprx-vision. JSON main-out.flow не пустой. Нода не поднимается. Чекер IP = предыдущая страна.
+
+Сделай на роутере (идемпотентно, можно гонять повторно):
+
+1) Скрипт из репо:
+   wget -O /tmp/fix-nv8443-flow.sh https://raw.githubusercontent.com/t296tt39/wispyx-homeproxy/master/fix-nv8443-flow.sh
+   sh /tmp/fix-nv8443-flow.sh
+   /etc/init.d/homeproxy restart
+
+   Если wget нет — правки руками:
+   /etc/homeproxy/scripts/generate_client.uc
+     было: flow: node.vless_flow,
+     стало: flow: ("" + node.port === "8443") ? null : node.vless_flow,
+   /etc/homeproxy/scripts/update_subscriptions.uc
+     config.vless_flow = (config.port === '8443') ? null : (ob.flow || null);
+     в parse URI: если url.port 8443 → vless_flow null, иначе как было (params.flow при tls/reality).
+   Для каждой ноды port=8443: uci delete homeproxy.<id>.vless_flow
+   uci commit homeproxy
+   /etc/init.d/homeproxy restart
+
+2) Проверка (без ключей в отчёт):
+   jsonfilter -i /var/run/homeproxy/hiddify-c.json -e '@.outbounds[@.tag="main-out"].flow'
+     пусто = ок
+   jsonfilter ... '@.outbounds[@.tag="main-out"].server'
+     == uci address выбранной страны
+   Clash /proxies/main-out/delay gstatic generate_204 не 65535
+   ipinfo через mixed-порт 5330: страна совпадает с выбранной нодой (Норвегия может быть Berlin SERV.HOST — так размечена железка)
+
+3) После смены страны в LuCI: один restart HomeProxy и дёрнуть Wi‑Fi клиента. interrupt_exist_connections не включать.
+
+Не требуй Vision «чтобы туннель жил». Не factory-reset. hp.uc из этого репо: пустой flow на *.wispyx.net = first-line F.
+```
+
 ---
 
-Скопируй агенту блок ниже целиком.
+Скопируй агенту блок ниже целиком (полный накат флота).
 
 ````
 Роутер OpenWrt, HomeProxy, ядро hiddify (или sing-box если hiddify нет). Это wispyx. Секреты/uuid/ключи/тела подписки не печатай. В git не пушь.
@@ -48,6 +90,7 @@
 ════════════════════════════════
 - Найди URL подписки wispyx (uci homeproxy / LuCI Subscription).
 - Прямо сейчас скачай и обнови ноды: `ucode /etc/homeproxy/scripts/update_subscriptions.uc` (или кнопка Update в LuCI). Дождись импорта. Без свежих нод ничего не меряй.
+- Сразу патч leftover Vision (иначе Update вернёт `xtls-rprx-vision` на `:8443`, нода мертва, чекер IP = старая страна): `wget -O /tmp/fix-nv8443-flow.sh https://raw.githubusercontent.com/t296tt39/wispyx-homeproxy/master/fix-nv8443-flow.sh && sh /tmp/fix-nv8443-flow.sh` затем один `/etc/init.d/homeproxy restart`. JSON `main-out.flow` должен быть пустой.
 - Повесь часовой cron, идемпотентно, маркер `#wispyx-hp-sub`, не дублируй:
   `0 * * * * /etc/homeproxy/scripts/update_crond.sh #wispyx-hp-sub`
   `sed -i '/#wispyx-hp-sub/d' /etc/crontabs/root` затем допиши строку, `/etc/init.d/cron reload`.
