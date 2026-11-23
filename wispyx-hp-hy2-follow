@@ -1,0 +1,58 @@
+#!/bin/sh
+# Follow urltest VLESS country with matching Hy2 card. No secrets in logs.
+# DE→hy2de FI→hy2fi NL→hy2nl PL→hy2pl NR→hy2nr; unknown → hy2de.
+TAG=wispyx-hp-hy2
+H=homeproxy
+RN=tspu_hy2
+WANT=/tmp/wispyx-hy2-want
+L(){ logger -t $TAG "$*"; }
+
+ip route | grep -q '^default' || exit 0
+[ "$(uci -q get $H.$RN)" = routing_node ] || exit 0
+[ "$(uci -q get $H.$RN.enabled)" = 1 ] || exit 0
+
+hy2_for_addr() {
+	a=$1
+	case "$a" in
+		de.srv.wispyx.net) echo hy2de ;;
+		fn.srv.wispyx.net) echo hy2fi ;;
+		nl3.srv.wispyx.net|nl2.srv.wispyx.net|nl.srv.wispyx.net) echo hy2nl ;;
+		pl2.srv.wispyx.net|pl.srv.wispyx.net) echo hy2pl ;;
+		nr.srv.wispyx.net) echo hy2nr ;;
+		*) echo hy2de ;;
+	esac
+}
+
+vless_id=""
+now=$(wget -qO- -T 4 -Y off "http://127.0.0.1:9090/proxies/main-out" 2>/dev/null)
+if [ -n "$now" ]; then
+	tag=$(echo "$now" | jsonfilter -e '@.now' 2>/dev/null)
+	case "$tag" in
+		cfg-*-out) vless_id=${tag#cfg-}; vless_id=${vless_id%-out} ;;
+	esac
+fi
+if [ -z "$vless_id" ]; then
+	m=$(uci -q get $H.config.main_node)
+	[ "$m" = urltest ] || vless_id=$m
+fi
+[ -n "$vless_id" ] || exit 0
+addr=$(uci -q get $H.$vless_id.address) || exit 0
+want=$(hy2_for_addr "$addr")
+[ "$(uci -q get $H.$want.type)" = hysteria2 ] || want=hy2de
+[ "$(uci -q get $H.$want.type)" = hysteria2 ] || exit 0
+
+cur=$(uci -q get $H.$RN.node)
+[ "$want" = "$cur" ] && { rm -f "$WANT"; exit 0; }
+
+prev=$(cat "$WANT" 2>/dev/null || true)
+if [ "$prev" != "$want" ]; then
+	echo "$want" > "$WANT"
+	L "hy2 want $want, wait confirm"
+	exit 0
+fi
+
+uci set $H.$RN.node="$want"
+uci commit $H
+rm -f "$WANT"
+L "hy2 follow -> $want"
+/etc/init.d/homeproxy reload >/dev/null 2>&1 || /etc/init.d/homeproxy restart >/dev/null 2>&1

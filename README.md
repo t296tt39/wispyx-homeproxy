@@ -10,13 +10,15 @@
 3. Вкрутить плюшки (fragment, маршруты, PS5, QUIC).
 4. Замерить ещё раз после fragment — main по второму замеру.
 5. Мосты и обходы — **вторая линия**, не main, пока прямая страна живая.
-6. Автофейловер: urltest + watchdog — если текущий сервер подох, сам берёт самый быстрый живой.
+6. Автофейловер: urltest из DE/FI/NL/PL/NR + watchdog. Hy2 (Телега/CoD/BF1) следует за той же страной.
 
 Подписка даёт **только ноды**. Фрагментация, маршруты, ИИ, PS5 в UCI сами не приедут.
 
 Секреты, UUID, ключи, тело подписки в отчёт не писать.
 
 `hp.uc` в этом репо — положить в `/usr/share/wispyx/hp.uc` (chmod +x). Старый файл требует Vision для класса F: после перехода на :8443 без Vision **страна (DE/AT/US) пропадает из first-line**, watchdog прыгает на Польшу/обход. Новый: пустой flow на `*.srv.wispyx.net` = F, Обход = S. Ноды не с `*.wispyx.net` classify игнорирует.
+
+`wispyx-hp-hy2-follow` — `/usr/bin/wispyx-hp-hy2-follow`, cron каждую минуту. Hy2 следует за страной urltest (DE/FI/NL/PL/NR). Без default route скрипт сразу выходит.
 
 Не factory-reset HomeProxy (подписка и ноды стран/обходов остаются). Кастомные **routing_rule** перед накатом золота снести и поставить заново — старый зоопарк (yt_ копии, youtube_node, левые outbound) иначе остаётся. Снимок старых правил обязателен.
 
@@ -92,8 +94,9 @@
 - Прямо сейчас скачай и обнови ноды: `ucode /etc/homeproxy/scripts/update_subscriptions.uc` (или кнопка Update в LuCI). Дождись импорта. Без свежих нод ничего не меряй.
 - Сразу патч leftover Vision (иначе Update вернёт `xtls-rprx-vision` на `:8443`, нода мертва, чекер IP = старая страна): `wget -O /tmp/fix-nv8443-flow.sh https://raw.githubusercontent.com/t296tt39/wispyx-homeproxy/master/fix-nv8443-flow.sh && sh /tmp/fix-nv8443-flow.sh` затем один `/etc/init.d/homeproxy restart`. JSON `main-out.flow` должен быть пустой.
 - Повесь часовой cron, идемпотентно, маркер `#wispyx-hp-sub`, не дублируй:
-  `0 * * * * /etc/homeproxy/scripts/update_crond.sh #wispyx-hp-sub`
+  `0 * * * * /etc/homeproxy/scripts/update_crond.sh; ucode /usr/share/wispyx/hp.uc ensure >/dev/null 2>&1 #wispyx-hp-sub`
   `sed -i '/#wispyx-hp-sub/d' /etc/crontabs/root` затем допиши строку, `/etc/init.d/cron reload`.
+  `ensure` без рестарта ядра: fragment, NV-8443 flow strip, urltest не расширять за пять стран (сначала `hp.uc remember` всех F+S, потом pin DE/FI/NL/PL/NR).
 - `uci set homeproxy.subscription.auto_update=1` и `update_via_proxy=1`. Штатный `auto_update_time` — раз в сутки, его не хватает; часовой `#wispyx-hp-sub` init.d не затирает (он трогает только `#homeproxy_autosetup`).
 - После каждого обновления подписки:
   1) сотри leftover Vision на first-line: для каждой страны `*.srv.wispyx.net` с `port=8443` сделай `uci delete homeproxy.<id>.vless_flow`. Импортёр после Update часто снова пишет `xtls-rprx-vision` — хендшейк на NV-8443 мёртвый, чекер показывает **прошлый** IP.
@@ -142,6 +145,7 @@ uci:
 - routing_mode = proxy_banned_ru
 - show_advanced_rules = 1
 - proxy_mode = redirect_tproxy
+- proxy_calls = 0
 - proxy_ru_rule refilter = on, node = main-out
 - proxy_ru_rule russia-inside = on, node = main-out
 
@@ -195,14 +199,21 @@ C) FanDuel → **🇺🇸 США**, не main страны
    - `uci set homeproxy.fanduel_proxy.outbound=fanduel_us`, domain_suffix `fanduel.com`.
    Нет карточки США — временно main-out, в отчёте напиши.
 
-D) telegram_proxy → main-out
-   telegram.org, t.me, td.es, telegram.me, tdesktop.com + DC IP если уже были
-
-E) cod_ips_proxy → main-out
-   185.34.106.0/23, 185.92.222.0/24
-
-F) cod_ports_proxy → main-out
-   TCP+UDP 3074, 3075, 3478-3480, 27014-27050, 30000-32000
+D–F) Телега / CoD / BF1 → **Hy2 той же страны, что urltest**, не VLESS main-out.
+   Подписка Happ/SINGBOX Hy2 **не эмитит**. Карточки только руками в UCI, не factory-reset.
+   Одна `routing_node` `tspu_hy2` (не две на один Hy2 tag — generate падает). `game_hy2` если был — `enabled=0`.
+   Карточки `type=hysteria2` port 443 tls=1 tls_sni=тот же хост tls_alpn=h3 tls_insecure=0 hysteria_up/down_mbps=100.
+   Пароль = UUID VLESS **этого** аккаунта (`uci get` с карточки страны), в отчёт не писать.
+   `hy2de`→de.srv `hy2fi`→fn.srv `hy2nl`→nl3.srv `hy2pl`→pl2.srv `hy2nr`→nr.srv. Не класть Hy2 в urltest и не в main.
+   `tspu_hy2.node` стартует с `hy2de`. Следилка `/usr/bin/wispyx-hp-hy2-follow` (файл в этом репо), cron `* * * * * … #wispyx-hp-hy2`: Clash `main-out.now` → страна → та же Hy2. Два одинаковых выбора подряд, потом reload. Без default route — exit 0.
+   Маппинг: DE→hy2de FI→hy2fi NL→hy2nl PL→hy2pl NR→hy2nr. Нет карточки — hy2de.
+   Правила (port/port_range, не dest_port; иначе матчер пустой и сожрёт весь UDP):
+   - telegram_proxy → tspu_hy2: telegram.org t.me td.es telegram.me tdesktop.com telegram-cdn.org telesco.pe telegra.ph
+   - telegram_ip_proxy → tspu_hy2: 149.154.160.0/20 91.108.4.0/22 91.108.8.0/22 91.108.12.0/22 91.108.16.0/22 91.108.36.0/23 91.108.56.0/22
+   - cod_ips_proxy → tspu_hy2: 185.34.106.0/23 185.92.222.0/24
+   - cod_ports_proxy → tspu_hy2: TCP+UDP 3074 3075, ranges 3478:3480 27014:27050 30000:32000
+   - bf1_ports_proxy → tspu_hy2: 3659 5222 9988 17502 22990 42127, ranges 14000:14016 22990:23006 25200:25300 20000:20100
+   Не вешать 80/443 в игровые правила. ps5_global_proxy не должен перехватывать приставку раньше портовых правил.
 
 G) YouTube / QUIC
    Реклама YouTube режется **на Xray ноды** (country VLESS → серверный YouTube hop). На роутере отдельных YT-нод нет и не будет.
@@ -211,7 +222,7 @@ G) YouTube / QUIC
    ЗАПРЕЩЕНО: клонировать ноды `yt_*`, urltest `youtube_node`, youtube_proxy на Обход/usbr/Wi‑Fi/АВТО, класть YT-копии в main urltest, тащить YouTube на прямой US, менять main из-за YouTube.
    YouTube через двуххоп-обход зависает (QUIC) и **минует** серверный ads-hop. hp.uc ensure не должен создавать yt_ копии; watchdog не переключает YouTube-ноды.
 
-Порядок правил после сноса: private/LAN direct; PS5 если найден; RU-сервисы direct (.ru/.su/.рф); quic_drop; youtube_proxy → main-out; ИИ/FanDuel/Telegram/CoD в VPN; valve_direct только если был в снимке; последним foreign_via_vpn → main-out.
+Порядок правил после сноса: private/LAN direct; PS5 если найден; RU-сервисы direct (.ru/.su/.рф); quic_drop; youtube_proxy → main-out; ИИ → main-out; FanDuel → fanduel_us; Telegram+DC / CoD / BF1 → tspu_hy2; valve_direct только если был в снимке; последним foreign_via_vpn → main-out. Catch-all пересоздать последним (порядок секций = порядок JSON).
 
 apply HomeProxy, дождаться ядра.
 
@@ -224,9 +235,9 @@ main_node = лучший стабильный из ПЕРВОЙ линии по 
 Вторую линию в main ставь только если первая снова вся fail/>800ms/флап.
 Запиши в отчёт обе таблицы (до и после fragment) и какой main выбран.
 
-Америка с роутера: «🇺🇸 Обход США» usbr, не прямой US IP.
+Америка с роутера: FanDuel = карточка us.srv:8443 через `fanduel_us`. Остальной US-трафик — urltest VLESS, не прямой Kamatera IP.
 Финка если прямой fn.srv мёртв — Обход/Мост как запас, не как первый выбор.
-Австрия Hy2 на HomeProxy не поднимается.
+Hy2 не main и не член urltest. Карточки Hy2 на HomeProxy живые (DE/FI/NL/PL/NR).
 
 ════════════════════════════════
 ШАГ 5 — АВТОПЕРЕКЛЮЧЕНИЕ (если сервер подох)
@@ -239,16 +250,18 @@ A) Нативный urltest HomeProxy (предпочтительно)
 - test_url = https://www.gstatic.com/generate_204 (HTTPS, не ICMP).
 - interval 5m–10m. idle_timeout ~30m.
 - interrupt_exist_connections = 0 / false — иначе рвёт PS5/CoD на каждом замере.
-- tolerance ~100–150 ms, чтобы не прыгать между соседними странами каждую минуту.
-- Члены СТРОГО в таком порядке:
-  1) все живые VLESS TCP REALITY первой линии (страны);
-  2) в хвост вторая линия: Обход Польша, Обход Финляндия/Мост, Обход США.
-- В группу НЕ класть: АВТОРЕЖИМ, Wi‑Fi, Hy2, XHTTP, CDN, stolen SNI, прямой Kamatera/fatal.
-- main_node = эта urltest-группа, не одиночная нода.
+- interval 30s, tolerance 100 ms.
+- Члены urltest **ровно пять**, VLESS TCP REALITY :8443 пустой flow, в этом порядке:
+  🇩🇪 de.srv  🇫🇮 fn.srv  🇳🇱 nl3.srv  🇵🇱 pl2.srv  🇳🇴 nr.srv
+- НЕ класть в urltest: SE/AT/US, АВТОРЕЖИМ, Wi‑Fi, Hy2, XHTTP, CDN, stolen SNI, Обход/Мост, Kamatera/fatal.
+- Мосты не в urltest: watchdog берёт S только если все пять F мертвы.
+- После pin: `ucode /usr/share/wispyx/hp.uc remember` (все F+S в `/etc/wispyx-hp-known`), иначе hourly ensure допишет SE/AT/US.
+- main_node = `urltest` (нативная группа HomeProxy), не одиночная нода и не лейбл АВТОРЕЖИМ.
 Ядро само уведёт трафик на самый быстрый живой. Пока страны живы, мост с 350ms не победит. Если все страны timeout — возьмёт обход.
 
 B) Watchdog, даже если urltest есть
 Скрипт /usr/bin/wispyx-hp-watch (или /etc/homeproxy.d/), cron каждые 5 минут. Идемпотентно, не плодить crontab.
+Нет default route (роутер без WAN) — **не** вешай `*/5` watchdog: generate_204 мёртв → петля рестартов. Закомментируй `#*/5 … #wispyx-hp-watch`. Как появился WAN — раскомментируй.
 Логика:
 1) HTTPS generate_204 через mixed-порт (часто 127.0.0.1:5330) timeout 8s. 204 = ок, выйти.
 2) Два фейла подряд (флаг /tmp/wispyx-hp-fail, не переключать с первого глюка).
@@ -275,6 +288,8 @@ C) После обновления подписки
 - Не убивать watchdog: он нужен. Чини **classify** (`hp.uc` из этого репо), не cron.
 - Не включать interrupt_exist_connections — рвёт игры.
 - Не ставить main на АВТОРЕЖИМ / Wi‑Fi / Hy2 / XHTTP / CDN / steal.
+- Не класть Hy2 в urltest. Не слать Телегу/CoD/BF1 в VLESS, если tspu_hy2 жив.
+- Не расширять urltest за DE/FI/NL/PL/NR (SE/AT/US только если явно сказали).
 - Не отключать PS5/CoD «чтобы почистить».
 - Не клонировать `yt_*` / `youtube_node` urltest. YouTube = main-out. Не тащить YouTube на Обход/usbr/прямой US.
 - Не ждать, что подписка сама включит fragment и route.rules.
@@ -292,14 +307,17 @@ C) После обновления подписки
 - tls_fragment=1 на wispyx VLESS
 - main = urltest `wispyx_auto` ИЛИ победитель шага 4; в отчёте как именно устроен фейловер
 - watchdog cron есть, пробный generate_204 через mixed-порт проходит
-- cron `0 * * * * ... update_crond.sh #wispyx-hp-sub` есть ровно одна строка
+- cron `0 * * * * ... update_crond.sh; ucode /usr/share/wispyx/hp.uc ensure … #wispyx-hp-sub` есть ровно одна строка
 - cron `17 1 * * * /usr/bin/wispyx-hp-daily #wispyx-hp-daily` есть ровно одна строка
+- cron `* * * * * /usr/bin/wispyx-hp-hy2-follow #wispyx-hp-hy2` есть; watchdog `*/5` есть **только если есть default route**
 - подписка только что обновлена в этом прогоне (не «уже стояла вчера»)
 - PS5 /32 → main-out или «не найден»
-- ru_services_direct с ru/su/xn--p1ai, ai_domains_proxy, cod_*, quic_drop на месте
+- ru_services_direct с ru/su/xn--p1ai, ai_domains_proxy, quic_drop на месте
+- telegram/telegram_ip/cod_*/bf1 → tspu_hy2; JSON hysteria2 есть; urltest без Hy2
 - show_advanced_rules=1 и catch-all `foreign_via_vpn` → main-out последним, в JSON есть `0.0.0.0/0`
 - youtube.com ролик открывается через main-out (нет секций `yt_*` / `youtube_node`)
-- АВТОРЕЖИМ не выбран
+- АВТОРЕЖИМ не выбран; urltest = DE FI NL PL NR
+- leftover Vision на :8443 = 0; interrupt_exist_connections=0; proxy_calls=0
 - `ucode /usr/share/wispyx/hp.uc classify`: страны `*.srv.wispyx.net` `:8443` = **F**, Обход = S. Если DE нет в F — leftover Vision на карточке или старый hp.uc (требует `xtls-rprx-vision`). Положи `hp.uc` из этого репо в `/usr/share/wispyx/hp.uc`.
 - Живой выход: `jsonfilter -i /var/run/homeproxy/hiddify-c.json -e '@.outbounds[@.tag="main-out"].server'` == UCI address выбранной страны. ipinfo через mixed-порт должен совпасть со страной main (DE → Германия, не Австрия). Не печатай IP в отчёт.
 - FanDuel: outbound `fanduel_us`, не main-out.
@@ -311,4 +329,4 @@ C) После обновления подписки
 
 Репозиторий: https://github.com/t296tt39/wispyx-homeproxy
 
-«открой README, скопируй блок агенту одним куском. Сначала обновить подписку и cron раз в час. После импорта сотри Vision с стран :8443. Рестарт ядра — раз в сутки ночью плюс один раз если сменил main. Перед плюшками: снимок старых routing_rule, снести все правила и yt_ копии, накатить золото (подписку не ресетить). Catch-all с 0.0.0.0/0. hp.uc classify: пустой flow = F. Потом замер стран → плюшки → второй замер → urltest+watchdog. Мосты запас.»
+«открой README, скопируй блок агенту одним куском. Сначала обновить подписку и cron раз в час (+ hp.uc ensure). После импорта сотри Vision с стран :8443. Рестарт ядра — раз в сутки ночью плюс один раз если сменил main. Перед плюшками: снимок старых routing_rule, снести все правила и yt_ копии, накатить золото (подписку не ресетить). Catch-all с 0.0.0.0/0. urltest ровно DE/FI/NL/PL/NR. Телега/CoD/BF1 в Hy2 той же страны (wispyx-hp-hy2-follow). YouTube/ИИ/интернет — VLESS urltest. Мосты запас. Watchdog не вешать без WAN.»
